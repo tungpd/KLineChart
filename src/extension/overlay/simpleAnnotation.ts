@@ -23,11 +23,33 @@ const simpleAnnotation: OverlayTemplate = {
   },
   createPointFigures: ({ overlay, coordinates }) => {
     let text = ''
+    let color = ''
     if (isValid(overlay.extendData)) {
       if (!isFunction(overlay.extendData)) {
-        text = (overlay.extendData ?? '') as string
+        // allow object { text, color } or plain string
+        const ed = overlay.extendData
+        if (ed !== null && typeof ed === 'object') {
+          // cast to a shaped object to access known fields
+          const obj = ed as { text?: unknown; color?: unknown }
+          const t = obj.text
+          if (typeof t === 'string') text = t
+          const c = obj.color
+          if (typeof c === 'string') color = c
+        } else if (typeof overlay.extendData === 'string' || typeof overlay.extendData === 'number' || typeof overlay.extendData === 'boolean') {
+          text = String(overlay.extendData)
+        }
       } else {
-        text = (overlay.extendData(overlay)) as string
+        const fn = overlay.extendData as (o: unknown) => unknown
+        const res = fn(overlay)
+        if (res !== null && typeof res === 'object') {
+          const obj = res as { text?: unknown; color?: unknown }
+          const t = obj.text
+          if (typeof t === 'string') text = t
+          const c = obj.color
+          if (typeof c === 'string') color = c
+        } else if (typeof res === 'string' || typeof res === 'number' || typeof res === 'boolean') {
+          text = String(res)
+        }
       }
     }
     const startX = coordinates[0].x
@@ -48,6 +70,7 @@ const simpleAnnotation: OverlayTemplate = {
       {
         type: 'text',
         attrs: { x: startX, y: arrowEndY, text, align: 'center', baseline: 'bottom' },
+        styles: (typeof color === 'string' && color.length > 0) ? { color } : undefined,
         ignoreEvent: true
       }
     ]

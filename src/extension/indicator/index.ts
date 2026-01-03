@@ -37,6 +37,7 @@ import psychologicalLine from './psychologicalLine'
 import rateOfChange from './rateOfChange'
 import relativeStrengthIndex from './relativeStrengthIndex'
 import simpleMovingAverage from './simpleMovingAverage'
+import smartMoneyConcepts from './smartMoneyConcepts'
 import stoch from './stoch'
 import stopAndReverse from './stopAndReverse'
 import tripleExponentiallySmoothedAverage from './tripleExponentiallySmoothedAverage'
@@ -52,7 +53,7 @@ const extensions = [
   directionalMovementIndex, easeOfMovementValue, exponentialMovingAverage, momentum,
   movingAverage, movingAverageConvergenceDivergence, onBalanceVolume, priceAndVolumeTrend,
   psychologicalLine, rateOfChange, relativeStrengthIndex, simpleMovingAverage,
-  stoch, stopAndReverse, tripleExponentiallySmoothedAverage, volume, volumeRatio, williamsR
+  smartMoneyConcepts, stoch, stopAndReverse, tripleExponentiallySmoothedAverage, volume, volumeRatio, williamsR
 ]
 
 extensions.forEach((indicator: IndicatorTemplate) => {
