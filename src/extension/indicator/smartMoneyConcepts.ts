@@ -14,6 +14,8 @@
 
 import type { IndicatorTemplate } from '../../component/Indicator'
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- numeric conversions below ensure values are primitive numbers before assignment */
+
 /**
  * Smart Money Concepts Result Interface
  *
@@ -260,7 +262,7 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
     let internalTrend = 0
 
     // Results array
-    const results: SmartMoneyResult[] = dataList.map(() => ({}))
+    const results: SmartMoneyResult[] = dataList.map((): SmartMoneyResult => ({}))
 
     /**
      * ========================================
@@ -285,81 +287,74 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
      * - We must detect pivots first, THEN check future bars for breaks
      */
 
-    // === STEP 1: Detect all pivot points ===
-    for (let i = 0; i < dataList.length; i++) {
-      const high = dataList[i].high
-      const low = dataList[i].low
+    // === STEP 1: Detect all pivot points (Pine-style offset confirmation)
+    // Implementation mirrors TradingView Pine logic: a pivot at index p is
+    // confirmed when, after `length` bars, the bar at p is higher/lower
+    // than all following `length` bars. We also preserve the `os` state
+    // toggling behavior to avoid duplicate pivot emissions.
 
-      // ===== SWING HIGH DETECTION (50-bar lookback) =====
-      if (i >= swingLength && i < dataList.length - swingLength) {
-        let isSwingHigh = true
-        for (let j = i - swingLength; j <= i + swingLength; j++) {
-          if (j !== i && dataList[j].high >= high) {
-            isSwingHigh = false
-            break
-          }
-        }
-        if (isSwingHigh) {
-          swingHighs.push({ index: i, price: high })
-          results[i].swingHighMarker = high
-          console.log(`Swing High at index ${i}: ${high}`)
-        }
+    // --- Swing pivots (offset = swingLength) ---
+    let swingOs: number | null = null // 0 = top, 1 = bottom
+    for (let i = swingLength; i < dataList.length; i++) {
+      const p = i - swingLength
+      // scan forward window p+1 .. i
+      let maxHigh = -Infinity
+      let minLow = Infinity
+      for (let j = p + 1; j <= i; j++) {
+        const hj = Number(dataList[j].high)
+        const lj = Number(dataList[j].low)
+        if (hj > maxHigh) maxHigh = hj
+        if (lj < minLow) minLow = lj
       }
 
-      // ===== SWING LOW DETECTION (50-bar lookback) =====
-      if (i >= swingLength && i < dataList.length - swingLength) {
-        let isSwingLow = true
+      const pivotHigh = Number(dataList[p].high)
+      const pivotLow = Number(dataList[p].low)
 
-        // Check if this bar's low is less than all lows in the window
-        for (let j = i - swingLength; j <= i + swingLength; j++) {
-          if (j !== i && dataList[j].low <= low) {
-            isSwingLow = false
-            break
-          }
-        }
+      let currOs = swingOs
+      if (pivotHigh > maxHigh) currOs = 0
+      else if (pivotLow < minLow) currOs = 1
 
-        if (isSwingLow) {
-          swingLows.push({ index: i, price: low })
-          results[i].swingLowMarker = low // Add visual marker (cyan circle)
-          console.log(`Swing Low at index ${i}: ${low}`)
-        }
+      // emit pivot when os toggles to a new state (matches Pine's os logic)
+      if (currOs === 0 && swingOs !== 0) {
+        swingHighs.push({ index: p, price: pivotHigh })
+        results[p].swingHighMarker = pivotHigh
+      }
+      if (currOs === 1 && swingOs !== 1) {
+        swingLows.push({ index: p, price: pivotLow })
+        results[p].swingLowMarker = pivotLow
       }
 
-      // ===== INTERNAL HIGH DETECTION (5-bar lookback) =====
-      // Internal highs provide early signals of potential trend changes
-      // They are more frequent but less significant than swing highs
-      if (i >= internalLength && i < dataList.length - internalLength) {
-        let isInternalHigh = true
+      swingOs = currOs
+    }
 
-        for (let j = i - internalLength; j <= i + internalLength; j++) {
-          if (j !== i && dataList[j].high >= high) {
-            isInternalHigh = false
-            break
-          }
-        }
-
-        if (isInternalHigh) {
-          internalHighs.push({ index: i, price: high })
-          // No visual marker for internal pivots to avoid chart clutter
-        }
+    // --- Internal pivots (offset = internalLength) ---
+    let internalOs: number | null = null
+    for (let i = internalLength; i < dataList.length; i++) {
+      const p = i - internalLength
+      let maxHigh = -Infinity
+      let minLow = Infinity
+      for (let j = p + 1; j <= i; j++) {
+        const hj = Number(dataList[j].high)
+        const lj = Number(dataList[j].low)
+        if (hj > maxHigh) maxHigh = hj
+        if (lj < minLow) minLow = lj
       }
 
-      // ===== INTERNAL LOW DETECTION (5-bar lookback) =====
-      // Internal lows complement internal highs for short-term structure analysis
-      if (i >= internalLength && i < dataList.length - internalLength) {
-        let isInternalLow = true
+      const pivotHigh = Number(dataList[p].high)
+      const pivotLow = Number(dataList[p].low)
 
-        for (let j = i - internalLength; j <= i + internalLength; j++) {
-          if (j !== i && dataList[j].low <= low) {
-            isInternalLow = false
-            break
-          }
-        }
+      let currIos = internalOs
+      if (pivotHigh > maxHigh) currIos = 0
+      else if (pivotLow < minLow) currIos = 1
 
-        if (isInternalLow) {
-          internalLows.push({ index: i, price: low })
-        }
+      if (currIos === 0 && internalOs !== 0) {
+        internalHighs.push({ index: p, price: pivotHigh })
       }
+      if (currIos === 1 && internalOs !== 1) {
+        internalLows.push({ index: p, price: pivotLow })
+      }
+
+      internalOs = currIos
     }
 
     /**
@@ -396,7 +391,7 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
 
     // === STEP 2: Detect BOS/CHoCH for Swing Structure ===
     for (let i = 0; i < dataList.length; i++) {
-      const close = dataList[i].close
+      const close = Number(dataList[i].close)
 
       // ===== CHECK FOR BULLISH SWING BREAKS =====
       for (const pivot of swingHighs) {
@@ -515,3 +510,5 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
 }
 
 export default smartMoneyConcepts
+
+/* eslint-enable @typescript-eslint/no-unsafe-assignment -- end of numeric-conversion guarded region */
