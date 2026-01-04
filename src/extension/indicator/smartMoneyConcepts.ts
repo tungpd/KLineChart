@@ -389,6 +389,57 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
      * - Performance degradation from checking already-broken levels
      */
 
+    // Collect pivot render instructions (used by custom draw below)
+    const pivots: Array<{
+      key: keyof SmartMoneyResult
+      pivotIndex: number
+      breakIndex: number
+      price: number
+      level: 'swing' | 'internal'
+    }> = []
+
+    // Helper: safely write a horizontal range for a given figure key.
+    // This clears any existing values for the same key that overlap the
+    // region being written so older pivot ranges don't persist past newer
+    // pivots (which caused confusing visuals when multiple pivots used the
+    // same figure key but different prices).
+    const writeRange = (key: keyof SmartMoneyResult, start: number, end: number, price: number): void => {
+      // If there exists a contiguous run for the same key that begins before
+      // `start` but continues into or beyond `start`, truncate that previous
+      // run so it ends at `start - 1`. This prevents older pivot ranges from
+      // persisting across newer pivots that occupy overlapping indices.
+      let runStart: number | null = null
+      let k = Math.max(0, start - 1)
+      while (k >= 0) {
+        if (results[k]?.[key] !== undefined) {
+          runStart = k
+          k--
+        } else {
+          break
+        }
+      }
+      if (runStart !== null) {
+        // find end of that run
+        let runEnd = runStart
+        while (runEnd + 1 < results.length && results[runEnd + 1]?.[key] !== undefined) runEnd++
+        if (runEnd >= start) {
+          for (let m = start; m <= runEnd && m < results.length; m++) {
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- dynamic deletion of result properties is necessary for pivot range truncation
+            delete results[m][key]
+          }
+        }
+      }
+      // Write new values
+      for (let j = start; j <= end && j < results.length; j++) {
+        results[j][key] = price
+      }
+    }
+
+    // Helper: record a pivot for rendering as a single per-pivot line
+    const pushPivot = (key: keyof SmartMoneyResult, pivotIndex: number, breakIndex: number, price: number, level: 'swing' | 'internal'): void => {
+      pivots.push({ key, pivotIndex, breakIndex, price, level })
+    }
+
     // === STEP 2: Detect BOS/CHoCH for Swing Structure ===
     for (let i = 0; i < dataList.length; i++) {
       const close = Number(dataList[i].close)
@@ -398,16 +449,14 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
         if (pivot.index < i && close > pivot.price) {
           if (swingTrend === -1) {
             // CHoCH: was bearish, now breaking high
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].swingChochBull = pivot.price
-            }
+            writeRange('swingChochBull', pivot.index, i, pivot.price)
+            pushPivot('swingChochBull', pivot.index, i, pivot.price, 'swing')
             console.log(`Swing CHoCH Bull: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             swingTrend = 1
           } else {
             // BOS: continuation
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].swingBosBull = pivot.price
-            }
+            writeRange('swingBosBull', pivot.index, i, pivot.price)
+            pushPivot('swingBosBull', pivot.index, i, pivot.price, 'swing')
             console.log(`Swing BOS Bull: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             swingTrend = 1
           }
@@ -426,9 +475,8 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
             // Previous trend was bullish (1), now we're breaking a low
             // This signals a potential trend REVERSAL to bearish
 
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].swingChochBear = pivot.price
-            }
+            writeRange('swingChochBear', pivot.index, i, pivot.price)
+            pushPivot('swingChochBear', pivot.index, i, pivot.price, 'swing')
             console.log(`Swing CHoCH Bear: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             swingTrend = -1 // Update trend to bearish
           } else if (swingTrend === -1 || swingTrend === 0) {
@@ -436,9 +484,8 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
             // Trend was already bearish (-1) or neutral (0)
             // Breaking a low confirms trend CONTINUATION
 
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].swingBosBear = pivot.price
-            }
+            writeRange('swingBosBear', pivot.index, i, pivot.price)
+            pushPivot('swingBosBear', pivot.index, i, pivot.price, 'swing')
 
             console.log('Bearish BOS detected (swing continuation) at index', i, 'price:', pivot.price, 'swingLow index:', pivot.index)
             swingTrend = -1 // Confirm bearish trend
@@ -455,16 +502,14 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
         if (pivot.index < i && close > pivot.price) {
           if (internalTrend === -1) {
             // Internal CHoCH: Minor trend reversal to bullish
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].internalChochBull = pivot.price
-            }
+            writeRange('internalChochBull', pivot.index, i, pivot.price)
+            pushPivot('internalChochBull', pivot.index, i, pivot.price, 'internal')
             console.log(`Internal CHoCH Bull: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             internalTrend = 1
           } else {
             // Internal BOS: Minor trend continuation bullish
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].internalBosBull = pivot.price
-            }
+            writeRange('internalBosBull', pivot.index, i, pivot.price)
+            pushPivot('internalBosBull', pivot.index, i, pivot.price, 'internal')
             console.log(`Internal BOS Bull: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             internalTrend = 1
           }
@@ -478,16 +523,14 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
         if (pivot.index < i && close < pivot.price) {
           if (internalTrend === 1) {
             // Internal CHoCH: Minor trend reversal to bearish
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].internalChochBear = pivot.price
-            }
+            writeRange('internalChochBear', pivot.index, i, pivot.price)
+            pushPivot('internalChochBear', pivot.index, i, pivot.price, 'internal')
             console.log(`Internal CHoCH Bear: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             internalTrend = -1
           } else {
             // Internal BOS: Minor trend continuation bearish
-            for (let j = pivot.index; j <= i; j++) {
-              results[j].internalBosBear = pivot.price
-            }
+            writeRange('internalBosBear', pivot.index, i, pivot.price)
+            pushPivot('internalBosBear', pivot.index, i, pivot.price, 'internal')
             console.log(`Internal BOS Bear: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             internalTrend = -1
           }
@@ -505,7 +548,65 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
      * - Null/undefined values create gaps (no rendering)
      * - Consecutive identical values form continuous horizontal lines
      */
+    // expose pivots for custom draw
+    ;(indicator as { extendData?: unknown }).extendData = { pivots }
     return results
+  },
+
+  // Custom draw: render per-pivot lines directly (prevents per-bar merged lines)
+  draw: ({ ctx, indicator, xAxis, yAxis }): boolean => {
+    // Retrieve recorded pivots
+    const extendData = (indicator as { extendData?: unknown }).extendData
+    const pivots: Array<{
+      key: keyof SmartMoneyResult
+      pivotIndex: number
+      breakIndex: number
+      price: number
+      level: 'swing' | 'internal'
+    }> = (extendData as { pivots?: Array<{
+      key: keyof SmartMoneyResult
+      pivotIndex: number
+      breakIndex: number
+      price: number
+      level: 'swing' | 'internal'
+    }> } | undefined)?.pivots ?? []
+    if (pivots.length === 0) return true
+
+    // Style map (matches figure definitions above)
+    const styleMap: Record<string, { color: string; size: number; style?: string; dashedValue?: number[] }> = {
+      swingBosBull: { color: '#22c55e', size: 2 },
+      swingBosBear: { color: '#ef4444', size: 2 },
+      swingChochBull: { color: '#10b981', size: 2 },
+      swingChochBear: { color: '#f87171', size: 2 },
+      internalBosBull: { color: '#86efac', size: 1, style: 'dashed', dashedValue: [4, 4] },
+      internalBosBear: { color: '#fca5a5', size: 1, style: 'dashed', dashedValue: [4, 4] },
+      internalChochBull: { color: '#6ee7b7', size: 1, style: 'dashed', dashedValue: [4, 4] },
+      internalChochBear: { color: '#fbbf24', size: 1, style: 'dashed', dashedValue: [4, 4] }
+    }
+
+    // draw each pivot as its own line
+    for (const p of pivots) {
+      const x1 = xAxis.convertToPixel(p.pivotIndex)
+      const x2 = xAxis.convertToPixel(p.breakIndex)
+      const y = yAxis.convertToPixel(p.price)
+      const styles = styleMap[p.key as string] ?? { color: '#999', size: 1 }
+
+      ctx.save()
+      ctx.strokeStyle = styles.color
+      ctx.lineWidth = styles.size
+      if (styles.style === 'dashed' && Array.isArray(styles.dashedValue)) {
+        ctx.setLineDash(styles.dashedValue)
+      } else {
+        ctx.setLineDash([])
+      }
+      ctx.beginPath()
+      ctx.moveTo(x1, y)
+      ctx.lineTo(x2, y)
+      ctx.stroke()
+      ctx.restore()
+    }
+    // indicate we've covered rendering for this indicator
+    return true
   }
 }
 
