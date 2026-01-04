@@ -357,6 +357,27 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
       internalOs = currIos
     }
 
+    // If a pivot is detected as BOTH a swing pivot and an internal pivot
+    // keep only the swing pivot. This removes internal pivots that share
+    // the same pivot index as any swing pivot and clears their markers
+    // from the per-bar `results` array to avoid double-visualization.
+    for (let k = internalHighs.length - 1; k >= 0; k--) {
+      const idx = internalHighs[k].index
+      if (results[idx]?.swingHighMarker !== undefined) {
+        internalHighs.splice(k, 1)
+        // no per-bar internal marker present in this indicator; removal
+        // of the internal pivot from `internalHighs` is sufficient
+      }
+    }
+    for (let k = internalLows.length - 1; k >= 0; k--) {
+      const idx = internalLows[k].index
+      if (results[idx]?.swingLowMarker !== undefined) {
+        internalLows.splice(k, 1)
+        // no per-bar internal marker present in this indicator; removal
+        // of the internal pivot from `internalLows` is sufficient
+      }
+    }
+
     /**
      * ========================================
      * PHASE 2: SWING STRUCTURE BREAK DETECTION
@@ -403,7 +424,13 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
     // region being written so older pivot ranges don't persist past newer
     // pivots (which caused confusing visuals when multiple pivots used the
     // same figure key but different prices).
+    // Global clamp for structure lengths (in candles)
+    const MAX_STRUCTURE_LENGTH = 500
+
     const writeRange = (key: keyof SmartMoneyResult, start: number, end: number, price: number): void => {
+      if (end - start > MAX_STRUCTURE_LENGTH) return // exclude structures longer than maximum length
+      // clamp end so no structure spans more than MAX_STRUCTURE_LENGTH candles
+      const cappedEnd = Math.min(end, start + MAX_STRUCTURE_LENGTH, results.length - 1)
       // If there exists a contiguous run for the same key that begins before
       // `start` but continues into or beyond `start`, truncate that previous
       // run so it ends at `start - 1`. This prevents older pivot ranges from
@@ -423,20 +450,24 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
         let runEnd = runStart
         while (runEnd + 1 < results.length && results[runEnd + 1]?.[key] !== undefined) runEnd++
         if (runEnd >= start) {
-          for (let m = start; m <= runEnd && m < results.length; m++) {
+          // only truncate up to the capped end to avoid touching bars beyond cap
+          const truncEnd = Math.min(runEnd, cappedEnd)
+          for (let m = start; m <= truncEnd && m < results.length; m++) {
             // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- dynamic deletion of result properties is necessary for pivot range truncation
             delete results[m][key]
           }
         }
       }
-      // Write new values
-      for (let j = start; j <= end && j < results.length; j++) {
+      // Write new values (capped)
+      for (let j = start; j <= cappedEnd && j < results.length; j++) {
         results[j][key] = price
       }
     }
 
     // Helper: record a pivot for rendering as a single per-pivot line
     const pushPivot = (key: keyof SmartMoneyResult, pivotIndex: number, breakIndex: number, price: number, level: 'swing' | 'internal'): void => {
+      const structureLength = breakIndex - pivotIndex
+      if (structureLength > MAX_STRUCTURE_LENGTH) return // exclude structures longer than maximum length
       pivots.push({ key, pivotIndex, breakIndex, price, level })
     }
 
@@ -451,16 +482,16 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
             // CHoCH: was bearish, now breaking high
             writeRange('swingChochBull', pivot.index, i, pivot.price)
             pushPivot('swingChochBull', pivot.index, i, pivot.price, 'swing')
-            console.log(`Swing CHoCH Bull: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             swingTrend = 1
           } else {
             // BOS: continuation
             writeRange('swingBosBull', pivot.index, i, pivot.price)
             pushPivot('swingBosBull', pivot.index, i, pivot.price, 'swing')
-            console.log(`Swing BOS Bull: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             swingTrend = 1
           }
           swingHighs.splice(swingHighs.indexOf(pivot), 1)
+          // Remove from internal arrays to prevent double-counting
+          internalHighs.splice(internalHighs.findIndex(p => p.index === pivot.index), 1)
           break
         }
       }
@@ -477,7 +508,6 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
 
             writeRange('swingChochBear', pivot.index, i, pivot.price)
             pushPivot('swingChochBear', pivot.index, i, pivot.price, 'swing')
-            console.log(`Swing CHoCH Bear: pivot=${pivot.index} break=${i} price=${pivot.price}`)
             swingTrend = -1 // Update trend to bearish
           } else if (swingTrend === -1 || swingTrend === 0) {
             // === BOS SCENARIO ===
@@ -487,11 +517,12 @@ const smartMoneyConcepts: IndicatorTemplate<SmartMoneyResult> = {
             writeRange('swingBosBear', pivot.index, i, pivot.price)
             pushPivot('swingBosBear', pivot.index, i, pivot.price, 'swing')
 
-            console.log('Bearish BOS detected (swing continuation) at index', i, 'price:', pivot.price, 'swingLow index:', pivot.index)
             swingTrend = -1 // Confirm bearish trend
           }
 
           swingLows.splice(swingLows.indexOf(pivot), 1)
+          // Remove from internal arrays to prevent double-counting
+          internalLows.splice(internalLows.findIndex(p => p.index === pivot.index), 1)
           break
         }
       }
